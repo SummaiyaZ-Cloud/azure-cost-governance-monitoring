@@ -1,76 +1,175 @@
-# Azure Cost Governance & Monitoring
+# Azure Cost Governance & Automated Monitoring
 
 ## Project Overview
 
-This project demonstrates the implementation of an Azure cost governance and monitoring solution using Azure Cost Management, Azure Monitor, Log Analytics, Azure Resource Graph, Action Groups, and Azure Workbooks.
+This project implements an Azure cost governance and monitoring solution using Azure Cost Management, Azure Monitor, Log Analytics, Azure Resource Graph, Action Groups, and Azure Workbooks.
 
-The goal was to create a centralized solution for monitoring Azure spending, detecting potentially unused resources, configuring automated budget notifications, and visualizing the Azure environment.
+The solution provides proactive budget monitoring, automated cost notifications, centralized operational logging, resource optimization queries, policy-based governance, and dashboard visualization across an Azure subscription.
 
 ---
 
 ## Architecture
 
-The solution uses:
+The solution follows the following monitoring and governance workflow:
 
-- Azure Cost Management for budget tracking
-- Azure Monitor for centralized monitoring
-- Azure Action Groups for automated email notifications
-- Log Analytics Workspace for centralized log collection
-- Azure Resource Graph for resource inventory and optimization queries
-- Azure Workbooks for dashboard visualization
-- Azure Policy/Tags for cost governance
+```text
+Azure Subscription
+│
+├── Azure Cost Management
+│   └── Monthly Budget ($20)
+│       ├── 50% Threshold ($10)
+│       ├── 80% Threshold ($16)
+│       └── 100% Threshold ($20)
+│               │
+│               ▼
+│       Azure Monitor Action Group
+│       └── Automated Email Notification
+│
+├── Azure Activity Log
+│       │
+│       ▼
+│   Diagnostic Settings
+│       │
+│       ▼
+│   Log Analytics Workspace
+│
+├── Azure Resource Graph
+│   ├── Resource Inventory
+│   ├── Unattached Disk Detection
+│   └── Unassigned Public IP Detection
+│
+└── Azure Workbook
+    └── Cost Governance & Monitoring Dashboard
+```
 
 ---
 
-## Implementation
+## Technologies Used
 
-### 1. Cost Budget
+- Microsoft Azure
+- Azure Cost Management + Billing
+- Azure Monitor
+- Azure Monitor Action Groups
+- Azure Log Analytics
+- Azure Activity Log
+- Azure Diagnostic Settings
+- Azure Resource Graph
+- Kusto Query Language (KQL)
+- Azure Workbooks
+- Azure Policy
+- Azure Resource Tags
 
-Created a monthly Azure budget:
+---
 
-**Budget:** `$20/month`
+## Cost Management & Budget Monitoring
 
-Alert thresholds:
+A monthly Azure budget was configured at the subscription scope to provide proactive visibility into cloud spending.
 
-| Threshold | Amount | Notification |
-|---|---:|---|
-| 50% | $10 | Action Group Email |
-| 80% | $16 | Action Group Email |
-| 100% | $20 | Action Group Email |
+### Budget Configuration
 
-This provides proactive notification before cloud spending exceeds the configured budget.
+| Setting | Configuration |
+|---|---|
+| Budget | $20/month |
+| Scope | Azure subscription |
+| Reset Period | Monthly |
+| 50% Threshold | $10 |
+| 80% Threshold | $16 |
+| 100% Threshold | $20 |
 
-### 2. Action Group
+The three thresholds provide escalating notifications as Azure spending approaches the configured monthly budget.
 
-Created an Azure Monitor Action Group:
+### Budget Alert Thresholds
 
-`ag-cost-alerts`
+![Budget Alert Thresholds](01-budget-alert-thresholds.png)
 
-The Action Group is connected to the budget thresholds and configured to send email notifications when spending reaches the defined limits.
+---
 
-### 3. Log Analytics
+## Automated Cost Notifications
 
-Created a Log Analytics Workspace:
+An Azure Monitor Action Group was created to provide a reusable notification mechanism for cost alerts.
+
+### Action Group Configuration
+
+- **Action Group:** `ag-cost-alerts`
+- **Display Name:** `CostAlerts`
+- **Resource Group:** `rg-cost-monitoring-lab4`
+- **Region:** Global
+- **Notification Method:** Email
+
+The Action Group was associated with all three budget thresholds:
+
+- 50%
+- 80%
+- 100%
+
+This creates an automated notification workflow when spending reaches the configured limits.
+
+![Azure Monitor Action Group](02-action-group-configuration.png)
+
+### Budget and Action Group Integration
+
+![Budget Action Group Alerts](06-budget-action-group-alerts.png)
+
+---
+
+## Centralized Logging with Log Analytics
+
+A dedicated Log Analytics workspace was deployed for centralized monitoring and operational telemetry.
+
+### Workspace
 
 `law-cost-monitoring-lab4`
 
-The workspace provides a centralized location for Azure monitoring and log data.
+The workspace provides a centralized destination for Azure monitoring data and subscription-level operational logs.
 
-Subscription Activity Logs were configured to send supported log categories to the workspace.
+![Log Analytics Workspace](03-log-analytics-workspace.png)
 
-### 4. Azure Resource Graph
+---
 
-Azure Resource Graph was used to query resources across the subscription.
+## Activity Log Diagnostic Settings
 
-Example resource inventory query:
+Azure subscription Activity Logs were configured to send supported log categories to the Log Analytics workspace through a diagnostic setting.
+
+The configuration establishes the following telemetry pipeline:
+
+```text
+Azure Subscription
+        │
+        ▼
+Azure Activity Log
+        │
+        ▼
+Diagnostic Setting
+        │
+        ▼
+Log Analytics Workspace
+```
+
+Supported Activity Log categories were selected for forwarding to the workspace, including administrative, security, policy, service health, alert, recommendation, autoscale, and resource health events.
+
+![Activity Log Diagnostic Setting](05-activity-log-diagnostic-setting.png)
+
+---
+
+## Azure Resource Graph & Resource Optimization
+
+Azure Resource Graph was used to query the subscription inventory and identify resources that could represent unnecessary cloud spending.
+
+### Resource Inventory Query
 
 ```kusto
 Resources
-| summarize count() by type
-| order by count_ desc
+| summarize ResourceCount=count() by type
+| order by ResourceCount desc
 ```
 
-An additional query identifies unattached managed disks that could represent unnecessary cloud spending:
+This query provides a subscription-level inventory by Azure resource type.
+
+The query is stored in:
+
+`queries/resource-inventory.kql`
+
+### Unattached Managed Disk Detection
 
 ```kusto
 Resources
@@ -79,92 +178,158 @@ Resources
 | project name, resourceGroup, location, diskState = properties.diskState
 ```
 
-The queries are stored in the [`queries`](./queries) directory.
+Managed disks that are no longer attached to workloads can continue generating storage costs. This query provides a method for identifying potential cleanup candidates.
 
-### 5. Azure Workbook
+The query is stored in:
 
-Created an Azure Workbook named:
+`queries/unused-disks.kql`
 
-`Azure Cost Governance & Monitoring Dashboard`
+During testing, no managed disks matched the unattached-resource criteria.
 
-The workbook provides a centralized visualization of Azure resources and governance information using Resource Graph queries.
+![Resource Graph Unused Resource Query](04-resource-graph-unused-resource-query.png)
+
+### Unassigned Public IP Detection
+
+The environment was also evaluated for Public IP resources without an associated IP configuration.
+
+```kusto
+Resources
+| where type =~ 'microsoft.network/publicipaddresses'
+| where isempty(properties.ipConfiguration)
+| project name, resourceGroup, location, ipAddress = properties.ipAddress
+```
+
+At the time of testing, no matching unassigned Public IP resources were present.
+
+---
+
+## Azure Cost Governance & Monitoring Dashboard
+
+An Azure Workbook was created to provide a centralized visualization layer for the environment.
+
+The workbook incorporates Azure Resource Graph data to provide visibility into the subscription's resource footprint and cost-governance checks.
+
+### Dashboard Capabilities
+
+- Resource inventory visualization
+- Resource counts by Azure resource type
+- Unattached managed disk detection
+- Unassigned Public IP detection
+- Centralized governance monitoring view
+
+![Azure Cost Governance Monitoring Dashboard](07-cost-monitoring-dashboard.png)
 
 ---
 
 ## Cost Governance Strategy
 
-The solution combines several layers of governance:
+The solution implements multiple layers of Azure governance.
 
-**Prevent:** Azure Policy and tagging standards help enforce resource governance.
+### Prevent
 
-**Monitor:** Azure Monitor, Log Analytics, Resource Graph, and Workbooks provide visibility into the environment.
+Azure Policy and required resource tags enforce organizational deployment standards.
 
-**Alert:** Azure Cost Management budgets and Action Groups provide automated cost notifications.
+### Monitor
 
-**Optimize:** Resource Graph queries help identify resources that may be candidates for cleanup or cost optimization.
+Azure Monitor, Log Analytics, Activity Logs, Resource Graph, and Workbooks provide visibility into the Azure environment.
+
+### Alert
+
+Azure Cost Management budgets and Action Groups provide proactive notifications as spending approaches defined limits.
+
+### Optimize
+
+Resource Graph queries identify potential cleanup candidates such as unattached disks and unassigned Public IP addresses.
+
+This creates a governance lifecycle of:
+
+```text
+Prevent → Monitor → Alert → Optimize
+```
 
 ---
 
-## Challenges & Troubleshooting
+## Azure Policy & Resource Tagging
 
-### Azure Provider Registration
+The environment operates under an Azure Policy requiring resources to contain a `CostCenter` tag.
 
-During Action Group creation, Azure reported that the subscription was not registered for the `Microsoft.Insights` resource provider.
+Resources created for this project were configured with:
 
-The provider was registered before recreating the Action Group.
+```text
+CostCenter = CloudLab
+```
+
+This demonstrates how cost-management practices can be combined with Azure governance controls to support resource organization, accountability, and cost allocation.
+
+---
+
+## Challenges & Resolutions
+
+### Microsoft.Insights Resource Provider
+
+The initial Azure Monitor Action Group deployment failed because the subscription had not registered the `Microsoft.Insights` resource provider.
+
+The provider was registered at the subscription level, after which the Action Group deployed successfully.
 
 ### Azure Policy Enforcement
 
-Resource creation was initially blocked by an existing `CostCenter` tagging policy.
+Initial deployment of the Log Analytics workspace was blocked by the existing Azure Policy requiring a `CostCenter` resource tag.
 
-Required tags were added to resources to satisfy the governance policy.
+The workspace configuration was updated with:
 
-### Log Analytics Data
+```text
+CostCenter = CloudLab
+```
 
-Initial Log Analytics queries returned no results because the workspace had not yet received relevant log data.
+The deployment was then successfully completed while remaining compliant with the governance requirement.
 
-Subscription Activity Log diagnostic settings were configured to send supported categories to the Log Analytics workspace.
+### Log Analytics Data Availability
 
-### Resource Optimization Query
+Initial Log Analytics queries returned no results because the newly created workspace did not yet contain relevant ingested telemetry.
 
-The unattached disk query returned no results. This indicated that no managed disks currently matched the unused-disk criteria rather than indicating a query failure.
+Subscription Activity Logs were subsequently configured through diagnostic settings to send supported log categories to the Log Analytics workspace.
+
+### Resource Optimization Validation
+
+Resource Graph queries for unattached managed disks and unassigned Public IP addresses returned no matching resources during testing.
+
+The queries executed successfully and confirmed that no resources matching those optimization criteria existed at the time of evaluation.
 
 ---
 
-## What I Learned
+## Security & Governance Considerations
 
-Through this project I gained hands-on experience with:
+The implementation incorporates several Azure governance practices:
 
-- Azure Cost Management and budgets
+- Subscription-level budget monitoring
+- Automated threshold notifications
+- Reusable Azure Monitor Action Groups
+- Centralized operational logging
+- Subscription Activity Log forwarding
+- Azure Policy enforcement
+- Required cost-allocation tagging
+- Resource inventory monitoring
+- Detection of potential orphaned resources
+- Centralized dashboard visualization
+
+---
+
+## Skills Demonstrated
+
+- Azure Cost Management
+- Azure budget configuration
 - Automated cost alerting
 - Azure Monitor Action Groups
-- Log Analytics Workspaces
+- Log Analytics workspace configuration
+- Azure Activity Log monitoring
 - Diagnostic settings
-- Azure Resource Graph and KQL
+- Azure Resource Graph
+- Kusto Query Language (KQL)
 - Azure Workbooks
-- Azure Policy enforcement
-- Resource tagging and cost governance
-- Troubleshooting Azure resource-provider and policy errors
-
-Most importantly, I learned how Azure governance, monitoring, and cost-management services can work together rather than treating each service as an isolated feature.
-
----
-
-## Interview Talking Points
-
-This project demonstrates my ability to design a basic Azure cost-governance workflow rather than simply deploy individual resources.
-
-I can explain:
-
-- How budgets and thresholds can help prevent unexpected Azure spending
-- How Action Groups automate notifications
-- How tagging supports cost allocation and governance
-- How Azure Policy can enforce organizational standards
-- How Resource Graph can identify resources across a subscription
-- How KQL can be used to investigate potential optimization opportunities
-- How Log Analytics centralizes operational data
-- How Workbooks provide centralized monitoring views
-- How I troubleshot provider-registration, policy, and data-availability issues
+- Azure Policy compliance
+- Resource tagging
+- Cloud cost optimization
+- Azure troubleshooting
 
 ---
 
@@ -172,20 +337,28 @@ I can explain:
 
 ```text
 azure-cost-governance-monitoring/
+│
 ├── queries/
 │   ├── resource-inventory.kql
 │   └── unused-disks.kql
+│
+├── 01-budget-alert-thresholds.png
+├── 02-action-group-configuration.png
+├── 03-log-analytics-workspace.png
+├── 04-resource-graph-unused-resource-query.png
+├── 05-activity-log-diagnostic-setting.png
+├── 06-budget-action-group-alerts.png
+├── 07-cost-monitoring-dashboard.png
+│
 └── README.md
 ```
 
 ---
 
-## Technologies
+## Project Outcome
 
-`Microsoft Azure` `Azure Cost Management` `Azure Monitor` `Log Analytics` `Azure Resource Graph` `KQL` `Azure Workbooks` `Azure Policy` `GitHub`
+Implemented an Azure cost governance and monitoring solution integrating:
 
----
+**Cost Management → Budget Controls → Automated Alerting → Centralized Logging → Resource Analysis → Policy Governance → Monitoring Visualization**
 
-## Key Outcome
-
-Built an Azure cost governance and monitoring solution that combines budget controls, automated notifications, centralized logging, resource discovery, optimization queries, policy-based governance, and dashboard visualization.
+The project demonstrates how Azure-native governance and monitoring services can be combined to provide proactive cost visibility, operational monitoring, policy compliance, and resource optimization across an Azure subscription.
